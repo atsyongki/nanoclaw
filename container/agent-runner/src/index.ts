@@ -405,23 +405,22 @@ async function runQuery(
   closedDuringQuery: boolean;
 }> {
   const stream = new MessageStream();
-  stream.push(prompt);
-
-  // Load image attachments and send as multimodal content blocks
+  // Load image attachments and combine with text in a single multimodal message
   if (containerInput.imageAttachments?.length) {
-    const blocks: ContentBlock[] = [];
+    const blocks: ContentBlock[] = [{ type: 'text', text: prompt }];
     for (const img of containerInput.imageAttachments) {
       const imgPath = path.join('/workspace/group', img.relativePath);
       try {
         const data = fs.readFileSync(imgPath).toString('base64');
         blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data } });
+        log(`Loaded image: ${imgPath}`);
       } catch (err) {
         log(`Failed to load image: ${imgPath}`);
       }
     }
-    if (blocks.length > 0) {
-      stream.pushMultimodal(blocks);
-    }
+    stream.pushMultimodal(blocks);
+  } else {
+    stream.push(prompt);
   }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
@@ -474,7 +473,7 @@ async function runQuery(
   }
 
   for await (const message of query({
-    prompt: stream,
+    prompt: stream as any,
     options: {
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
