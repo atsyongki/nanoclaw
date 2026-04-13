@@ -4,7 +4,7 @@ import path from 'path';
 
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, TELEGRAM_API_ROOT, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
@@ -90,7 +90,10 @@ export class TelegramChannel implements Channel {
       const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
       const resp = await fetch(fileUrl);
       if (!resp.ok) {
-        logger.warn({ fileId, status: resp.status }, 'Telegram file download failed');
+        logger.warn(
+          { fileId, status: resp.status },
+          'Telegram file download failed',
+        );
         return null;
       }
 
@@ -106,11 +109,19 @@ export class TelegramChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    this.bot = new Bot(this.botToken, {
+    const clientOpts: ConstructorParameters<typeof Bot>[1] = {
       client: {
         baseFetchConfig: { agent: https.globalAgent, compress: true },
       },
-    });
+    };
+    if (TELEGRAM_API_ROOT) {
+      clientOpts.client = {
+        apiRoot: TELEGRAM_API_ROOT,
+        baseFetchConfig: { compress: true },
+      };
+      logger.info({ apiRoot: TELEGRAM_API_ROOT }, 'Using custom Telegram API root');
+    }
+    this.bot = new Bot(this.botToken, clientOpts);
 
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
@@ -337,14 +348,14 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:contact', (ctx) => storeMedia(ctx, '[Contact]'));
 
     // Handle errors gracefully
-    this.bot.catch((err) => {
-      logger.error({ err: err.message }, 'Telegram bot error');
+    this.bot.catch((err: unknown) => {
+      logger.error({ err: String(err) }, 'Telegram bot error');
     });
 
     // Start polling — returns a Promise that resolves when started
     return new Promise<void>((resolve) => {
       this.bot!.start({
-        onStart: (botInfo) => {
+        onStart: (botInfo: { username: string; id: number }) => {
           logger.info(
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',

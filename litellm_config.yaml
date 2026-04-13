@@ -1,0 +1,68 @@
+model_list:
+  # claude-haiku → Gemini Flash Lite (free quota primary)
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: gemini/gemini-2.5-flash-lite
+      api_key: os.environ/GOOGLE_API_KEY
+      drop_params: true
+      max_tokens: 4096
+
+  # claude-sonnet → Gemini Flash (free quota primary)
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY
+      drop_params: true
+      max_tokens: 4096
+  - model_name: claude-3-5-sonnet-20241022
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY
+      drop_params: true
+      max_tokens: 4096
+
+  # claude-opus → Gemini Pro (primary)
+  - model_name: claude-opus-4-6
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY
+      drop_params: true
+      max_tokens: 4096
+
+  # OpenRouter fallbacks (when Gemini quota is exhausted)
+  - model_name: claude-haiku-4-5-fallback
+    litellm_params:
+      model: openrouter/qwen/qwen3-235b-a22b-2507
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+      max_tokens: 4096
+  - model_name: claude-sonnet-4-6-fallback
+    litellm_params:
+      model: openrouter/moonshotai/kimi-k2.5
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+      max_tokens: 4096
+  - model_name: claude-3-5-sonnet-20241022-fallback
+    litellm_params:
+      model: openrouter/moonshotai/kimi-k2.5
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+      max_tokens: 4096
+  - model_name: claude-opus-4-6-fallback
+    litellm_params:
+      model: openrouter/moonshotai/kimi-k2-thinking
+      api_key: os.environ/OPENROUTER_API_KEY
+      drop_params: true
+      max_tokens: 4096
+
+router_settings:
+  fallbacks:
+    - {"claude-haiku-4-5": ["claude-haiku-4-5-fallback"]}
+    - {"claude-sonnet-4-6": ["claude-sonnet-4-6-fallback"]}
+    - {"claude-3-5-sonnet-20241022": ["claude-3-5-sonnet-20241022-fallback"]}
+    - {"claude-opus-4-6": ["claude-opus-4-6-fallback"]}
+  num_retries: 2
+  retry_after: 5
+
+general_settings:
+  allow_unauthorized_requests: true

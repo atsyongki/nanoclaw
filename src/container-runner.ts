@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 
 import {
+  ANTHROPIC_BASE_URL,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -263,6 +264,17 @@ async function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // When using a local LiteLLM proxy instead of Anthropic directly,
+  // inject the base URL and a placeholder key (LiteLLM doesn't validate it).
+  if (ANTHROPIC_BASE_URL) {
+    args.push('-e', `ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}`);
+    args.push(
+      '-e',
+      'ANTHROPIC_API_KEY=sk-ant-api01-litellm-proxy-placeholder-000000000000000000000000000000000000000000000000',
+    );
+    args.push('-e', 'NO_PROXY=host.docker.internal,127.0.0.1,localhost');
+  }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
