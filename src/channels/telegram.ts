@@ -4,7 +4,11 @@ import path from 'path';
 
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TELEGRAM_API_ROOT, TRIGGER_PATTERN } from '../config.js';
+import {
+  ASSISTANT_NAME,
+  TELEGRAM_API_ROOT,
+  TRIGGER_PATTERN,
+} from '../config.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
@@ -119,7 +123,10 @@ export class TelegramChannel implements Channel {
         apiRoot: TELEGRAM_API_ROOT,
         baseFetchConfig: { compress: true },
       };
-      logger.info({ apiRoot: TELEGRAM_API_ROOT }, 'Using custom Telegram API root');
+      logger.info(
+        { apiRoot: TELEGRAM_API_ROOT },
+        'Using custom Telegram API root',
+      );
     }
     this.bot = new Bot(this.botToken, clientOpts);
 
