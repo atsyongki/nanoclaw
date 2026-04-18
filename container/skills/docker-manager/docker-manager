@@ -166,6 +166,14 @@ case "$cmd" in
       [ -n "$MATCHED_CONTAINER" ] && CONTAINER="$MATCHED_CONTAINER"
     fi
 
+    # If still no match, try project name lookup (fuzzy)
+    if [ -z "$CONFIG_FILES" ]; then
+      if find_project_by_name "$CONTAINER"; then
+        echo "🔍 No container named '$CONTAINER' — matched compose project '$FOUND_PROJECT'"
+        exec "$0" restart-project "$CONTAINER"
+      fi
+    fi
+
     if [ -n "$CONFIG_FILES" ] && [ -n "$WORKING_DIR" ]; then
       # Translate Windows paths to WSL2 paths
       CONFIG_WSL=$(win_to_wsl "$CONFIG_FILES")
