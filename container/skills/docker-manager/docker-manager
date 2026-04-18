@@ -1,0 +1,134 @@
+#!/bin/bash
+set -euo pipefail
+
+# docker-manager — Inspect and manage Docker containers and compose stacks
+# Translates Windows paths (C:\docker\...) to WSL2 paths (/mnt/c/docker/...)
+
+VERSION="1.0.0"
+COMPOSE_MOUNT="${DOCKER_COMPOSE_DIR:-/mnt/c/docker}"
+
+usage() {
+  cat <<'USAGE'
+docker-manager — Inspect and manage Docker containers and compose stacks
+
+Usage:
+  docker-manager status              List all containers with their status
+  docker-manager stopped             List only stopped/exited containers
+  docker-manager restart <name>      Restart a container's compose stack (or container directly)
+  docker-manager logs <name> [N]     Show last N lines of container logs (default: 50)
+  docker-manager compose-list        List all detected compose projects
+  docker-manager help                Show this help
+
+Examples:
+  docker-manager stopped
+  docker-manager restart overseerr
+  docker-manager logs sonarr 100
+  docker-manager compose-list
+USAGE
+}
+
+# Translate a Windows path like C:\docker\foo\bar.yaml to /mnt/c/docker/foo/bar.yaml
+win_to_wsl() {
+  local p="$1"
+  # Already a Unix path
+  if [[ "$p" == /* ]]; then
+    echo "$p"
+    return
+  fi
+  # C:\foo\bar -> /mnt/c/foo/bar
+  echo "$p" | sed 's|^\([A-Za-z]\):\\|/mnt/\L\1/|; s|\\|/|g'
+}
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+  status|list)
+    echo "=== All Containers ==="
+    docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null
+    ;;
+
+  stopped|down)
+    echo "=== Stopped / Exited Containers ==="
+    STOPPED=$(docker ps -a --filter "status=exited" --filter "status=dead" --format "{{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null)
+    if [ -z "$STOPPED" ]; then
+      echo "✓ All containers are running."
+    else
+      printf "%-40s %-30s %s\n" "NAME" "STATUS" "IMAGE"
+      echo "$STOPPED" | while IFS=$'\t' read -r name status image; do
+        printf "%-40s %-30s %s\n" "$name" "$status" "$image"
+      done
+    fi
+    ;;
+
+  restart)
+    CONTAINER="${1:-}"
+    if [ -z "$CONTAINER" ]; then
+      echo "Usage: docker-manager restart <container-name>"
+      exit 1
+    fi
+
+    # Get compose labels (works even on stopped containers)
+    CONFIG_FILES=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+    WORKING_DIR=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+    PROJECT=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+
+    if [ -n "$CONFIG_FILES" ] && [ -n "$WORKING_DIR" ]; then
+      # Translate Windows paths to WSL2 paths
+      CONFIG_WSL=$(win_to_wsl "$CONFIG_FILES")
+      WORKING_WSL=$(win_to_wsl "$WORKING_DIR")
+
+      echo "📦 Compose project: $PROJECT"
+      echo "📄 Compose file:    $CONFIG_WSL"
+      echo "📁 Working dir:     $WORKING_WSL"
+      echo ""
+
+      if [ ! -f "$CONFIG_WSL" ]; then
+        echo "⚠️  Compose file not found at $CONFIG_WSL"
+        echo "Falling back to simple container restart..."
+        docker start "$CONTAINER"
+        echo "✓ Container $CONTAINER started."
+        exit 0
+      fi
+
+      echo "⏹  Stopping compose stack..."
+      docker compose -f "$CONFIG_WSL" down
+
+      echo "▶️  Starting compose stack..."
+      docker compose -f "$CONFIG_WSL" up -d
+
+      echo ""
+      echo "✓ Compose stack '$PROJECT' restarted successfully."
+    else
+      echo "ℹ️  No compose project found for '$CONTAINER' — doing direct start..."
+      docker start "$CONTAINER"
+      echo "✓ Container $CONTAINER started."
+    fi
+    ;;
+
+  logs)
+    CONTAINER="${1:-}"
+    LINES="${2:-50}"
+    if [ -z "$CONTAINER" ]; then
+      echo "Usage: docker-manager logs <container-name> [lines]"
+      exit 1
+    fi
+    echo "=== Logs: $CONTAINER (last $LINES lines) ==="
+    docker logs --tail "$LINES" "$CONTAINER" 2>&1
+    ;;
+
+  compose-list)
+    echo "=== Compose Projects ==="
+    docker compose ls -a 2>/dev/null || echo "docker compose ls not available"
+    ;;
+
+  help|--help|-h)
+    usage
+    ;;
+
+  *)
+    echo "Unknown command: $cmd"
+    usage
+    exit 1
+    ;;
+esac

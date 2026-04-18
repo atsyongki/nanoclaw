@@ -53,6 +53,13 @@ RUN npm run build
 COPY skills/pdf-reader/pdf-reader /usr/local/bin/pdf-reader
 RUN chmod +x /usr/local/bin/pdf-reader
 
+# Install Docker CLI for docker-manager skill
+RUN apt-get update && apt-get install -y docker.io && rm -rf /var/lib/apt/lists/*
+
+# Install docker-manager CLI
+COPY skills/docker-manager/docker-manager /usr/local/bin/docker-manager
+RUN chmod +x /usr/local/bin/docker-manager
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 

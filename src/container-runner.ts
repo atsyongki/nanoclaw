@@ -253,6 +253,27 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // Docker management: mount Docker socket and compose directory for main group
+  // so the agent can inspect and restart containers via docker-manager skill.
+  if (isMain) {
+    const dockerSock = '/var/run/docker.sock';
+    if (fs.existsSync(dockerSock)) {
+      mounts.push({
+        hostPath: dockerSock,
+        containerPath: '/var/run/docker.sock',
+        readonly: false,
+      });
+    }
+    const composeDir = '/mnt/c/docker';
+    if (fs.existsSync(composeDir)) {
+      mounts.push({
+        hostPath: composeDir,
+        containerPath: '/mnt/c/docker',
+        readonly: true,
+      });
+    }
+  }
+
   return mounts;
 }
 
@@ -274,7 +295,11 @@ async function buildContainerArgs(
       '-e',
       'ANTHROPIC_API_KEY=sk-ant-api01-litellm-proxy-placeholder-000000000000000000000000000000000000000000000000',
     );
-    args.push('-e', 'NO_PROXY=host.docker.internal,127.0.0.1,localhost');
+    const litellmHost = new URL(ANTHROPIC_BASE_URL).hostname;
+    args.push(
+      '-e',
+      `NO_PROXY=host.docker.internal,127.0.0.1,localhost,${litellmHost}`,
+    );
   }
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
