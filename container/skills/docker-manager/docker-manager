@@ -17,6 +17,8 @@ Usage:
   docker-manager services <name>             List all services in a container's compose project
   docker-manager restart <name> [service]    Restart a service or entire compose stack
   docker-manager restart-project <name>      Restart a whole compose project by project name
+  docker-manager stop-project <name>         Stop (but keep) all containers in a compose project
+  docker-manager down-project <name>         Stop and remove all containers in a compose project
   docker-manager logs <name> [N]             Show last N lines of container logs (default: 50)
   docker-manager compose-list                List all detected compose projects
   docker-manager help                        Show this help
@@ -268,6 +270,74 @@ case "$cmd" in
 
     echo ""
     echo "✓ Project '$FOUND_PROJECT' restarted."
+    ;;
+
+  stop-project|stop-stack)
+    PROJECT_QUERY="${1:-}"
+    if [ -z "$PROJECT_QUERY" ]; then
+      echo "Usage: docker-manager stop-project <project-name>"
+      exit 1
+    fi
+
+    if ! find_project_by_name "$PROJECT_QUERY"; then
+      echo "❌ No compose project matching '$PROJECT_QUERY' found."
+      echo "Known projects:"
+      docker ps -a --format '{{index .Labels "com.docker.compose.project"}}' \
+        | sort -u | grep -v '^$' | sed 's/^/  - /'
+      exit 1
+    fi
+
+    echo "📦 Project: $FOUND_PROJECT"
+    COMPOSE_WORKDIR=$(dirname "$FOUND_CONFIG_WSL")
+
+    if [ -f "$FOUND_CONFIG_WSL" ] && [ -d "$COMPOSE_WORKDIR" ]; then
+      echo "⏹  Stopping stack (containers kept)..."
+      (cd "$COMPOSE_WORKDIR" && docker compose -f "$FOUND_CONFIG_WSL" stop) || true
+    else
+      echo "⚠️  Compose file not accessible — stopping containers individually..."
+      docker ps --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}' \
+        | while read -r c; do
+          echo "  ⏹  Stopping $c..."
+          docker stop "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+        done
+    fi
+    echo ""
+    echo "✓ Project '$FOUND_PROJECT' stopped."
+    ;;
+
+  down-project|down-stack|remove-project|remove-stack)
+    PROJECT_QUERY="${1:-}"
+    if [ -z "$PROJECT_QUERY" ]; then
+      echo "Usage: docker-manager down-project <project-name>"
+      exit 1
+    fi
+
+    if ! find_project_by_name "$PROJECT_QUERY"; then
+      echo "❌ No compose project matching '$PROJECT_QUERY' found."
+      echo "Known projects:"
+      docker ps -a --format '{{index .Labels "com.docker.compose.project"}}' \
+        | sort -u | grep -v '^$' | sed 's/^/  - /'
+      exit 1
+    fi
+
+    echo "📦 Project: $FOUND_PROJECT"
+    COMPOSE_WORKDIR=$(dirname "$FOUND_CONFIG_WSL")
+
+    if [ -f "$FOUND_CONFIG_WSL" ] && [ -d "$COMPOSE_WORKDIR" ]; then
+      echo "🗑️  Bringing stack down (stop + remove containers)..."
+      (cd "$COMPOSE_WORKDIR" && docker compose -f "$FOUND_CONFIG_WSL" down) || true
+    else
+      echo "⚠️  Compose file not accessible — stopping and removing containers individually..."
+      docker ps -a --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}' \
+        | while read -r c; do
+          echo "  ⏹  Stopping $c..."
+          docker stop "$c" 2>/dev/null || true
+          echo "  🗑️  Removing $c..."
+          docker rm "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+        done
+    fi
+    echo ""
+    echo "✓ Project '$FOUND_PROJECT' removed."
     ;;
 
   compose-list)
