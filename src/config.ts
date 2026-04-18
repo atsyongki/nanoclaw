@@ -12,6 +12,8 @@ const envConfig = readEnvFile([
   'TZ',
   'ANTHROPIC_BASE_URL',
   'TELEGRAM_API_ROOT',
+  'HA_URL',
+  'HA_TOKEN',
 ]);
 
 export const ASSISTANT_NAME =
@@ -58,6 +60,8 @@ export const ANTHROPIC_BASE_URL =
   process.env.ANTHROPIC_BASE_URL || envConfig.ANTHROPIC_BASE_URL;
 export const TELEGRAM_API_ROOT =
   process.env.TELEGRAM_API_ROOT || envConfig.TELEGRAM_API_ROOT;
+export const HA_URL = process.env.HA_URL || envConfig.HA_URL;
+export const HA_TOKEN = process.env.HA_TOKEN || envConfig.HA_TOKEN;
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,

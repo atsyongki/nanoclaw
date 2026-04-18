@@ -506,6 +506,9 @@ async function runQuery(
         'NotebookEdit',
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
+        ...(process.env.HA_URL && process.env.HA_TOKEN
+          ? ['mcp__home-assistant__*']
+          : []),
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -525,6 +528,17 @@ async function runQuery(
           command: 'npx',
           args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
         },
+        ...(process.env.HA_URL && process.env.HA_TOKEN
+          ? {
+              'home-assistant': {
+                type: 'http' as const,
+                url: `${process.env.HA_URL.replace(/\/$/, '')}/api/mcp`,
+                headers: {
+                  Authorization: `Bearer ${process.env.HA_TOKEN}`,
+                },
+              },
+            }
+          : {}),
       },
       hooks: {
         PreCompact: [

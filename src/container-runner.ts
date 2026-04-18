@@ -14,6 +14,8 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  HA_TOKEN,
+  HA_URL,
   IDLE_TIMEOUT,
   ONECLI_URL,
   TIMEZONE,
@@ -286,6 +288,10 @@ async function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Pass Home Assistant connection config if configured
+  if (HA_URL) args.push('-e', `HA_URL=${HA_URL}`);
+  if (HA_TOKEN) args.push('-e', `HA_TOKEN=${HA_TOKEN}`);
 
   // When using a local LiteLLM proxy instead of Anthropic directly,
   // inject the base URL and a placeholder key (LiteLLM doesn't validate it).
