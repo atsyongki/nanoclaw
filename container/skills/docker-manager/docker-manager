@@ -231,38 +231,41 @@ case "$cmd" in
     fi
 
     echo "📦 Project:      $FOUND_PROJECT"
-    echo "📄 Compose file: $FOUND_CONFIG_WSL"
     echo ""
 
-    if [ -f "$FOUND_CONFIG_WSL" ]; then
-      # Check if any container in the project is running
-      RUNNING=$(docker ps --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}' | head -1)
-      if [ -n "$RUNNING" ]; then
-        echo "🔄 Project is running — doing graceful restart..."
-        docker compose -f "$FOUND_CONFIG_WSL" restart
-      else
-        echo "⏹  Project is stopped — recreating stack..."
-        docker compose -f "$FOUND_CONFIG_WSL" down
-        echo "▶️  Starting stack..."
-        docker compose -f "$FOUND_CONFIG_WSL" up -d
-      fi
-    else
-      echo "⚠️  Compose file not found at $FOUND_CONFIG_WSL — restarting containers individually..."
-      CONTAINERS=$(docker ps -a --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}')
-      TOTAL=$(echo "$CONTAINERS" | wc -l)
-      echo "$CONTAINERS" | while read -r c; do
-        STATE=$(docker inspect "$c" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
-        if [ "$STATE" = "running" ]; then
-          echo "  🔄 Restarting $c..."
-          docker restart "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
-        else
-          echo "  ▶️  Starting $c..."
-          docker start "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
-        fi
-      done
-      echo "✓ Project '$FOUND_PROJECT' restarted ($TOTAL containers)."
-      exit 0
+    # Always restart per-container (avoids compose file working dir / .env issues)
+    # Restart in dependency-aware order: stopped containers first, then running ones
+    CONTAINERS=$(docker ps -a --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}')
+    if [ -z "$CONTAINERS" ]; then
+      echo "❌ No containers found for project '$FOUND_PROJECT'."
+      exit 1
     fi
+
+    TOTAL=$(echo "$CONTAINERS" | wc -l)
+    echo "Restarting $TOTAL containers in project '$FOUND_PROJECT'..."
+    echo ""
+
+    # Start stopped containers first (e.g. nordvpn before qbittorrent)
+    echo "$CONTAINERS" | while read -r c; do
+      STATE=$(docker inspect "$c" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
+      if [ "$STATE" != "running" ]; then
+        echo "  ▶️  Starting $c (was $STATE)..."
+        docker start "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+      fi
+    done
+
+    # Then restart running containers
+    echo "$CONTAINERS" | while read -r c; do
+      STATE=$(docker inspect "$c" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
+      if [ "$STATE" = "running" ]; then
+        echo "  🔄 Restarting $c..."
+        docker restart "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+      fi
+    done
+
+    echo ""
+    echo "✓ Project '$FOUND_PROJECT' restarted ($TOTAL containers)."
+    ;;
 
     echo ""
     echo "✓ Project '$FOUND_PROJECT' restarted."
