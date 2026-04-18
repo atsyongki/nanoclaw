@@ -14,9 +14,15 @@ vi.mock('./config.js', () => ({
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  HA_TOKEN: undefined,
+  HA_URL: undefined,
   IDLE_TIMEOUT: 1800000, // 30min
+  NTFY_DEFAULT_TOPIC: undefined,
+  NTFY_TOKEN: undefined,
+  NTFY_URL: undefined,
   ONECLI_API_KEY: '',
   ONECLI_URL: 'http://localhost:10254',
+  TELEGRAM_API_ROOT: undefined,
   TIMEZONE: 'America/Los_Angeles',
 }));
 
