@@ -1,11 +1,22 @@
 ---
 name: docker-manager
-description: Inspect and manage Docker containers and compose stacks on the host machine.
+description: Inspect and manage Docker containers and compose stacks on the host machine. Use when user asks about containers, which are stopped, or wants to restart a service.
+allowed-tools: Bash(docker-manager:*)
 ---
 
 # docker-manager
 
 A CLI tool installed in the agent container that communicates with the host Docker daemon via the Docker socket. Translates Windows-style compose paths (C:\docker\...) to WSL2 paths automatically.
+
+## Quick start
+
+```bash
+docker-manager stopped             # List stopped/exited containers
+docker-manager status              # List ALL containers with status
+docker-manager restart overseerr   # Restart a container's compose stack
+docker-manager logs sonarr 100     # Show last 100 log lines
+docker-manager compose-list        # List all detected compose projects
+```
 
 ## Commands
 
@@ -19,10 +30,10 @@ docker-manager compose-list        List all detected compose projects
 
 ## When to use
 
-- User asks "which containers are down?" → run `docker-manager stopped`
-- User asks to restart a container → run `docker-manager restart <name>`
-- User asks about a container's logs → run `docker-manager logs <name>`
-- User asks for overall status → run `docker-manager status`
+- User asks "which containers are down?" → `docker-manager stopped`
+- User asks to restart a container → `docker-manager restart <name>`
+- User asks about a container's logs → `docker-manager logs <name>`
+- User asks for overall status → `docker-manager status`
 
 ## Notes
 
