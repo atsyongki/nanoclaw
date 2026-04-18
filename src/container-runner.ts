@@ -20,6 +20,7 @@ import {
   NTFY_DEFAULT_TOPIC,
   NTFY_TOKEN,
   NTFY_URL,
+  OLLAMA_ADMIN_TOOLS,
   ONECLI_API_KEY,
   ONECLI_URL,
   TIMEZONE,
@@ -302,6 +303,11 @@ async function buildContainerArgs(
   if (NTFY_TOKEN) args.push('-e', `NTFY_TOKEN=${NTFY_TOKEN}`);
   if (NTFY_DEFAULT_TOPIC)
     args.push('-e', `NTFY_DEFAULT_TOPIC=${NTFY_DEFAULT_TOPIC}`);
+
+  // Forward Ollama admin tools flag if enabled
+  if (OLLAMA_ADMIN_TOOLS) {
+    args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
+  }
 
   // When using a local LiteLLM proxy instead of Anthropic directly,
   // inject the base URL and a placeholder key (LiteLLM doesn't validate it).
