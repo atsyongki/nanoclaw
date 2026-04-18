@@ -14,6 +14,9 @@ const envConfig = readEnvFile([
   'TELEGRAM_API_ROOT',
   'HA_URL',
   'HA_TOKEN',
+  'NTFY_URL',
+  'NTFY_TOKEN',
+  'NTFY_DEFAULT_TOPIC',
 ]);
 
 export const ASSISTANT_NAME =
@@ -62,6 +65,10 @@ export const TELEGRAM_API_ROOT =
   process.env.TELEGRAM_API_ROOT || envConfig.TELEGRAM_API_ROOT;
 export const HA_URL = process.env.HA_URL || envConfig.HA_URL;
 export const HA_TOKEN = process.env.HA_TOKEN || envConfig.HA_TOKEN;
+export const NTFY_URL = process.env.NTFY_URL || envConfig.NTFY_URL;
+export const NTFY_TOKEN = process.env.NTFY_TOKEN || envConfig.NTFY_TOKEN;
+export const NTFY_DEFAULT_TOPIC =
+  process.env.NTFY_DEFAULT_TOPIC || envConfig.NTFY_DEFAULT_TOPIC || 'andy';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,

@@ -17,6 +17,9 @@ import {
   HA_TOKEN,
   HA_URL,
   IDLE_TIMEOUT,
+  NTFY_DEFAULT_TOPIC,
+  NTFY_TOKEN,
+  NTFY_URL,
   ONECLI_URL,
   TIMEZONE,
 } from './config.js';
@@ -292,6 +295,12 @@ async function buildContainerArgs(
   // Pass Home Assistant connection config if configured
   if (HA_URL) args.push('-e', `HA_URL=${HA_URL}`);
   if (HA_TOKEN) args.push('-e', `HA_TOKEN=${HA_TOKEN}`);
+
+  // Pass Ntfy notification config if configured
+  if (NTFY_URL) args.push('-e', `NTFY_URL=${NTFY_URL}`);
+  if (NTFY_TOKEN) args.push('-e', `NTFY_TOKEN=${NTFY_TOKEN}`);
+  if (NTFY_DEFAULT_TOPIC)
+    args.push('-e', `NTFY_DEFAULT_TOPIC=${NTFY_DEFAULT_TOPIC}`);
 
   // When using a local LiteLLM proxy instead of Anthropic directly,
   // inject the base URL and a placeholder key (LiteLLM doesn't validate it).

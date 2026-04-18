@@ -71,6 +71,10 @@ RUN chmod +x /usr/local/bin/docker-manager
 COPY skills/clawarr-suite/clawarr-suite /usr/local/bin/clawarr-suite
 RUN chmod +x /usr/local/bin/clawarr-suite
 
+# Install ntfy-notify CLI
+COPY skills/ntfy-notify/ntfy-notify /usr/local/bin/ntfy-notify
+RUN chmod +x /usr/local/bin/ntfy-notify
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
