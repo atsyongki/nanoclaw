@@ -6,6 +6,7 @@ import { google, gmail_v1 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 
 // isMain flag is used instead of MAIN_GROUP_FOLDER constant
+import { GMAIL_FORWARD_TO_AGENT } from '../config.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -295,15 +296,22 @@ export class GmailChannel implements Channel {
     const mainJid = mainEntry[0];
     const content = `[Email from ${senderName} <${senderEmail}>]\nSubject: ${subject}\n\n${body}`;
 
-    this.opts.onMessage(mainJid, {
-      id: messageId,
-      chat_jid: mainJid,
-      sender: senderEmail,
-      sender_name: senderName,
-      content,
-      timestamp,
-      is_from_me: false,
-    });
+    if (GMAIL_FORWARD_TO_AGENT) {
+      this.opts.onMessage(mainJid, {
+        id: messageId,
+        chat_jid: mainJid,
+        sender: senderEmail,
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+      });
+    } else {
+      logger.info(
+        { mainJid, from: senderName, subject },
+        'Gmail email received (not forwarded to agent — GMAIL_FORWARD_TO_AGENT=false)',
+      );
+    }
 
     // Mark as read
     try {

@@ -8,6 +8,7 @@ import { isValidTimezone } from './timezone.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'GMAIL_FORWARD_TO_AGENT',
   'OLLAMA_ADMIN_TOOLS',
   'ONECLI_URL',
   'ONECLI_API_KEY',
@@ -26,6 +27,9 @@ export const ASSISTANT_NAME =
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const GMAIL_FORWARD_TO_AGENT =
+  (process.env.GMAIL_FORWARD_TO_AGENT ||
+    envConfig.GMAIL_FORWARD_TO_AGENT) === 'true';
 export const OLLAMA_ADMIN_TOOLS =
   (process.env.OLLAMA_ADMIN_TOOLS || envConfig.OLLAMA_ADMIN_TOOLS) === 'true';
 export const POLL_INTERVAL = 2000;
