@@ -324,7 +324,7 @@ case "$cmd" in
       echo ""
       echo "  [$project]"
       docker ps -a --filter "label=com.docker.compose.project=$project" \
-        --format "    {{.Names}}\t{{.Status}}" | column -t
+        --format "    {{.Names}}\t{{.Status}}" | awk -F'\t' '{printf "    %-40s %s\n", $1, $2}'
     done < <(docker ps -a --format '{{.Names}}')
     ;;
 
