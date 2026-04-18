@@ -12,16 +12,24 @@ usage() {
 docker-manager — Inspect and manage Docker containers and compose stacks
 
 Usage:
-  docker-manager status              List all containers with their status
-  docker-manager stopped             List only stopped/exited containers
-  docker-manager restart <name>      Restart a container's compose stack (or container directly)
-  docker-manager logs <name> [N]     Show last N lines of container logs (default: 50)
-  docker-manager compose-list        List all detected compose projects
-  docker-manager help                Show this help
+  docker-manager status                      List all containers with their status
+  docker-manager stopped                     List only stopped/exited containers
+  docker-manager services <name>             List all services in a container's compose project
+  docker-manager restart <name> [service]    Restart a service or entire compose stack
+  docker-manager logs <name> [N]             Show last N lines of container logs (default: 50)
+  docker-manager compose-list                List all detected compose projects
+  docker-manager help                        Show this help
+
+Restart behaviour:
+  - If a specific [service] is given, restarts only that service in the stack
+  - If container is stopped, does compose down + up (full recreation)
+  - If container is running, does compose restart <service> (graceful)
 
 Examples:
   docker-manager stopped
+  docker-manager services overseerr
   docker-manager restart overseerr
+  docker-manager restart mystack sonarr
   docker-manager logs sonarr 100
   docker-manager compose-list
 USAGE
@@ -61,10 +69,52 @@ case "$cmd" in
     fi
     ;;
 
-  restart)
+  services)
     CONTAINER="${1:-}"
     if [ -z "$CONTAINER" ]; then
-      echo "Usage: docker-manager restart <container-name>"
+      echo "Usage: docker-manager services <container-or-project-name>"
+      exit 1
+    fi
+
+    # Try to find by container name first, then by project name
+    CONFIG_FILES=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+    WORKING_DIR=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+    PROJECT=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+
+    # If not found by container name, search by project name across all containers
+    if [ -z "$CONFIG_FILES" ]; then
+      MATCH=$(docker ps -a --format '{{.Names}}' | while read -r c; do
+        proj=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+        if [ "$proj" = "$CONTAINER" ]; then
+          docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null
+          break
+        fi
+      done)
+      CONFIG_FILES="$MATCH"
+    fi
+
+    if [ -z "$CONFIG_FILES" ]; then
+      echo "❌ No compose project found for '$CONTAINER'"
+      exit 1
+    fi
+
+    CONFIG_WSL=$(win_to_wsl "$CONFIG_FILES")
+    echo "📦 Compose project: ${PROJECT:-$CONTAINER}"
+    echo "📄 Compose file:    $CONFIG_WSL"
+    echo ""
+    if [ -f "$CONFIG_WSL" ]; then
+      echo "=== Services ==="
+      docker compose -f "$CONFIG_WSL" config --services 2>/dev/null
+    else
+      echo "⚠️  Compose file not found at $CONFIG_WSL"
+    fi
+    ;;
+
+  restart)
+    CONTAINER="${1:-}"
+    SERVICE="${2:-}"
+    if [ -z "$CONTAINER" ]; then
+      echo "Usage: docker-manager restart <container-or-service-name> [service]"
       exit 1
     fi
 
@@ -72,6 +122,24 @@ case "$cmd" in
     CONFIG_FILES=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
     WORKING_DIR=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
     PROJECT=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+
+    # If container name not found directly, try matching by compose service name
+    if [ -z "$CONFIG_FILES" ]; then
+      MATCHED_CONTAINER=""
+      while read -r c; do
+        svc=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.service"}}' 2>/dev/null || true)
+        if [ "$svc" = "$CONTAINER" ]; then
+          MATCHED_CONTAINER="$c"
+          CONFIG_FILES=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+          WORKING_DIR=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+          PROJECT=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+          # If no explicit service given, use the matched service name
+          [ -z "$SERVICE" ] && SERVICE="$CONTAINER"
+          break
+        fi
+      done < <(docker ps -a --format '{{.Names}}')
+      [ -n "$MATCHED_CONTAINER" ] && CONTAINER="$MATCHED_CONTAINER"
+    fi
 
     if [ -n "$CONFIG_FILES" ] && [ -n "$WORKING_DIR" ]; then
       # Translate Windows paths to WSL2 paths
@@ -81,6 +149,7 @@ case "$cmd" in
       echo "📦 Compose project: $PROJECT"
       echo "📄 Compose file:    $CONFIG_WSL"
       echo "📁 Working dir:     $WORKING_WSL"
+      [ -n "$SERVICE" ] && echo "🔧 Service:         $SERVICE"
       echo ""
 
       if [ ! -f "$CONFIG_WSL" ]; then
@@ -91,16 +160,38 @@ case "$cmd" in
         exit 0
       fi
 
-      echo "⏹  Stopping compose stack..."
-      docker compose -f "$CONFIG_WSL" down
+      # Check if the container is currently running or stopped
+      STATE=$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
 
-      echo "▶️  Starting compose stack..."
-      docker compose -f "$CONFIG_WSL" up -d
-
-      echo ""
-      echo "✓ Compose stack '$PROJECT' restarted successfully."
+      if [ "$STATE" = "running" ]; then
+        # Container is running — use compose restart (graceful, no recreation)
+        echo "🔄 Container is running — doing graceful restart..."
+        if [ -n "$SERVICE" ]; then
+          docker compose -f "$CONFIG_WSL" restart "$SERVICE"
+          echo ""
+          echo "✓ Service '$SERVICE' in project '$PROJECT' restarted."
+        else
+          docker compose -f "$CONFIG_WSL" restart
+          echo ""
+          echo "✓ All services in project '$PROJECT' restarted."
+        fi
+      else
+        # Container is stopped — need full down + up
+        echo "⏹  Container is stopped — recreating compose stack..."
+        docker compose -f "$CONFIG_WSL" down
+        echo "▶️  Starting compose stack..."
+        if [ -n "$SERVICE" ]; then
+          docker compose -f "$CONFIG_WSL" up -d "$SERVICE"
+          echo ""
+          echo "✓ Service '$SERVICE' in project '$PROJECT' started."
+        else
+          docker compose -f "$CONFIG_WSL" up -d
+          echo ""
+          echo "✓ Compose stack '$PROJECT' started."
+        fi
+      fi
     else
-      echo "ℹ️  No compose project found for '$CONTAINER' — doing direct start..."
+      echo "ℹ️  No compose project found for '$CONTAINER' — doing direct container restart..."
       docker start "$CONTAINER"
       echo "✓ Container $CONTAINER started."
     fi
