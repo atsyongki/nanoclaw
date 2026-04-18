@@ -174,59 +174,27 @@ case "$cmd" in
       fi
     fi
 
-    if [ -n "$CONFIG_FILES" ] && [ -n "$WORKING_DIR" ]; then
-      # Translate Windows paths to WSL2 paths
+    if [ -n "$CONFIG_FILES" ]; then
       CONFIG_WSL=$(win_to_wsl "$CONFIG_FILES")
-      WORKING_WSL=$(win_to_wsl "$WORKING_DIR")
-
       echo "📦 Compose project: $PROJECT"
       echo "📄 Compose file:    $CONFIG_WSL"
-      echo "📁 Working dir:     $WORKING_WSL"
       [ -n "$SERVICE" ] && echo "🔧 Service:         $SERVICE"
       echo ""
 
-      if [ ! -f "$CONFIG_WSL" ]; then
-        echo "⚠️  Compose file not found at $CONFIG_WSL"
-        echo "Falling back to simple container restart..."
-        docker start "$CONTAINER"
-        echo "✓ Container $CONTAINER started."
-        exit 0
-      fi
-
-      # Check if the container is currently running or stopped
       STATE=$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
-
       if [ "$STATE" = "running" ]; then
-        # Container is running — use compose restart (graceful, no recreation)
-        echo "🔄 Container is running — doing graceful restart..."
-        if [ -n "$SERVICE" ]; then
-          docker compose -f "$CONFIG_WSL" restart "$SERVICE"
-          echo ""
-          echo "✓ Service '$SERVICE' in project '$PROJECT' restarted."
-        else
-          docker compose -f "$CONFIG_WSL" restart
-          echo ""
-          echo "✓ All services in project '$PROJECT' restarted."
-        fi
+        echo "🔄 Restarting $CONTAINER..."
+        docker restart "$CONTAINER"
       else
-        # Container is stopped — need full down + up
-        echo "⏹  Container is stopped — recreating compose stack..."
-        docker compose -f "$CONFIG_WSL" down
-        echo "▶️  Starting compose stack..."
-        if [ -n "$SERVICE" ]; then
-          docker compose -f "$CONFIG_WSL" up -d "$SERVICE"
-          echo ""
-          echo "✓ Service '$SERVICE' in project '$PROJECT' started."
-        else
-          docker compose -f "$CONFIG_WSL" up -d
-          echo ""
-          echo "✓ Compose stack '$PROJECT' started."
-        fi
+        echo "▶️  Starting $CONTAINER (was stopped)..."
+        docker start "$CONTAINER"
       fi
+      echo "✓ Container '$CONTAINER' restarted."
     else
       echo "ℹ️  No compose project found for '$CONTAINER' — doing direct container restart..."
+      docker stop "$CONTAINER" 2>/dev/null || true
       docker start "$CONTAINER"
-      echo "✓ Container $CONTAINER started."
+      echo "✓ Container $CONTAINER restarted."
     fi
     ;;
 
@@ -259,36 +227,32 @@ case "$cmd" in
     fi
 
     echo "📦 Project:      $FOUND_PROJECT"
-    echo "📄 Compose file: $FOUND_CONFIG_WSL"
     echo ""
 
-    if [ ! -f "$FOUND_CONFIG_WSL" ]; then
-      echo "⚠️  Compose file not found at $FOUND_CONFIG_WSL"
-      echo "Falling back: restarting all containers in the project individually..."
-      docker ps -a --filter "label=com.docker.compose.project=$FOUND_PROJECT" \
-        --format '{{.Names}}' | while read -r c; do
-        echo "  Starting $c..."
-        docker start "$c" 2>/dev/null || true
-      done
-      echo "✓ Done."
-      exit 0
+    # Get all containers in project
+    CONTAINERS=$(docker ps -a --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}')
+    if [ -z "$CONTAINERS" ]; then
+      echo "❌ No containers found for project '$FOUND_PROJECT'."
+      exit 1
     fi
 
-    # Check if any container in the project is running
-    RUNNING=$(docker ps --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}' | head -1)
+    TOTAL=$(echo "$CONTAINERS" | wc -l)
+    echo "Restarting $TOTAL containers in project '$FOUND_PROJECT'..."
+    echo ""
 
-    if [ -n "$RUNNING" ]; then
-      echo "🔄 Project is running — doing graceful restart..."
-      docker compose -f "$FOUND_CONFIG_WSL" restart
-    else
-      echo "⏹  Project is stopped — recreating stack..."
-      docker compose -f "$FOUND_CONFIG_WSL" down
-      echo "▶️  Starting stack..."
-      docker compose -f "$FOUND_CONFIG_WSL" up -d
-    fi
+    echo "$CONTAINERS" | while read -r c; do
+      STATE=$(docker inspect "$c" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
+      if [ "$STATE" = "running" ]; then
+        echo "  🔄 Restarting $c..."
+        docker restart "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+      else
+        echo "  ▶️  Starting $c (was stopped)..."
+        docker start "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+      fi
+    done
 
     echo ""
-    echo "✓ Project '$FOUND_PROJECT' restarted."
+    echo "✓ Project '$FOUND_PROJECT' restarted ($TOTAL containers)."
     ;;
 
   compose-list)
