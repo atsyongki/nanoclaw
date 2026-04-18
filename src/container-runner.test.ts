@@ -20,6 +20,7 @@ vi.mock('./config.js', () => ({
   NTFY_DEFAULT_TOPIC: undefined,
   NTFY_TOKEN: undefined,
   NTFY_URL: undefined,
+  OLLAMA_ADMIN_TOOLS: false,
   ONECLI_API_KEY: '',
   ONECLI_URL: 'http://localhost:10254',
   TELEGRAM_API_ROOT: undefined,
