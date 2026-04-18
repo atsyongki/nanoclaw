@@ -1,6 +1,6 @@
 ---
 name: docker-manager
-description: Inspect and manage Docker containers and compose stacks on the host machine. Use when user asks about containers, which are stopped, wants to list services, or wants to restart a specific service.
+description: Inspect and manage Docker containers and compose stacks on the host machine. Use when the user asks about Docker containers (which are stopped, running, status), wants to restart a container, restart a stack/project, restart a service, list services, or check logs. Trigger phrases include "restart X stack", "restart X docker stack", "restart X compose", "which containers are down", "start X service", "container status".
 allowed-tools: Bash(docker-manager:*)
 ---
 
