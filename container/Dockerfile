@@ -67,6 +67,10 @@ RUN apt-get update && apt-get install -y ca-certificates curl gnupg && \
 COPY skills/docker-manager/docker-manager /usr/local/bin/docker-manager
 RUN chmod +x /usr/local/bin/docker-manager
 
+# Install clawarr-suite CLI
+COPY skills/clawarr-suite/clawarr-suite /usr/local/bin/clawarr-suite
+RUN chmod +x /usr/local/bin/clawarr-suite
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
