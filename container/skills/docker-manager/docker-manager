@@ -209,8 +209,40 @@ case "$cmd" in
     ;;
 
   compose-list)
-    echo "=== Compose Projects ==="
-    docker compose ls -a 2>/dev/null || echo "docker compose ls not available"
+    echo "=== Compose Projects (discovered from container labels) ==="
+    printf "%-30s %-50s %s\n" "PROJECT" "COMPOSE FILE" "CONTAINERS"
+    echo "--------------------------------------------------------------------------------------------------------------"
+
+    declare -A seen_projects
+    while read -r container; do
+      project=$(docker inspect "$container" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+      [ -z "$project" ] && continue
+      [ "${seen_projects[$project]+_}" ] && continue
+      seen_projects["$project"]=1
+
+      config_files=$(docker inspect "$container" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+      config_wsl=$(win_to_wsl "${config_files:-}")
+
+      # Count containers in this project
+      count=$(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}' | wc -l)
+
+      printf "%-30s %-50s %s container(s)\n" "$project" "${config_wsl:-unknown}" "$count"
+    done < <(docker ps -a --format '{{.Names}}')
+
+    # Show per-project container details
+    declare -A seen2
+    echo ""
+    while read -r container; do
+      project=$(docker inspect "$container" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+      [ -z "$project" ] && continue
+      [ "${seen2[$project]+_}" ] && continue
+      seen2["$project"]=1
+
+      echo ""
+      echo "  [$project]"
+      docker ps -a --filter "label=com.docker.compose.project=$project" \
+        --format "    {{.Names}}\t{{.Status}}" | column -t
+    done < <(docker ps -a --format '{{.Names}}')
     ;;
 
   help|--help|-h)
