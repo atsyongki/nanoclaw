@@ -91,6 +91,11 @@ export class GmailChannel implements Channel {
     logger.info({ email: this.userEmail }, 'Gmail channel connected');
 
     // Start polling with error backoff
+    if (!GMAIL_FORWARD_TO_AGENT) {
+      logger.info('Gmail polling disabled (GMAIL_FORWARD_TO_AGENT=false)');
+      return;
+    }
+
     const schedulePoll = () => {
       const backoffMs =
         this.consecutiveErrors > 0
