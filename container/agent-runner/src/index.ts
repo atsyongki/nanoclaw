@@ -503,7 +503,6 @@ async function runQuery(
         'SendMessage',
         'TodoWrite',
         'ToolSearch',
-        'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
