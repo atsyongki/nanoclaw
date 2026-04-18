@@ -17,7 +17,7 @@ docker-manager services overseerr             # List services in a container's c
 docker-manager restart overseerr              # Restart the entire compose stack (by container name)
 docker-manager restart-project home-media     # Restart a whole stack by project name (fuzzy)
 docker-manager stop-project home-media        # Stop (keep) all containers in a project
-docker-manager down-project home-media        # Stop and remove all containers in a project
+docker-manager down-project home-media        # Stop and remove all containers in a project (aliases: remove-project, remove-stack, remove)
 docker-manager logs sonarr 100                # Show last 100 log lines
 docker-manager compose-list                   # List all detected compose projects
 ```
@@ -44,7 +44,7 @@ docker-manager compose-list                    List all detected compose project
 - User asks to restart a container by name → `docker-manager restart <name>`
 - User asks to restart a specific service → `docker-manager restart <name> <service>`
 - User asks to stop a stack (keep containers) → `docker-manager stop-project <name>`
-- User asks to remove/down a stack → `docker-manager down-project <name>`
+- User asks to remove/down a stack → `docker-manager remove <name>` or `docker-manager down-project <name>`
 - User asks about a container's logs → `docker-manager logs <name>`
 - User asks for overall status → `docker-manager status`
 

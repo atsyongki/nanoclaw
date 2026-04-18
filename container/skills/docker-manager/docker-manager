@@ -305,7 +305,7 @@ case "$cmd" in
     echo "✓ Project '$FOUND_PROJECT' stopped."
     ;;
 
-  down-project|down-stack|remove-project|remove-stack)
+  down-project|down-stack|remove-project|remove-stack|remove)
     PROJECT_QUERY="${1:-}"
     if [ -z "$PROJECT_QUERY" ]; then
       echo "Usage: docker-manager down-project <project-name>"
