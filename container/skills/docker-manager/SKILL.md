@@ -11,39 +11,42 @@ A CLI tool installed in the agent container that communicates with the host Dock
 ## Quick start
 
 ```bash
-docker-manager stopped                    # List stopped/exited containers
-docker-manager status                     # List ALL containers with status
-docker-manager services overseerr         # List services in a container's compose project
-docker-manager restart overseerr          # Restart the entire compose stack
-docker-manager restart overseerr sonarr   # Restart only the 'sonarr' service
-docker-manager logs sonarr 100            # Show last 100 log lines
-docker-manager compose-list               # List all detected compose projects
+docker-manager stopped                        # List stopped/exited containers
+docker-manager status                         # List ALL containers with status
+docker-manager services overseerr             # List services in a container's compose project
+docker-manager restart overseerr              # Restart the entire compose stack (by container name)
+docker-manager restart overseerr sonarr       # Restart only the 'sonarr' service
+docker-manager restart-project home-media     # Restart a whole stack by project name (fuzzy)
+docker-manager logs sonarr 100                # Show last 100 log lines
+docker-manager compose-list                   # List all detected compose projects
 ```
 
 ## Commands
 
 ```
-docker-manager status                      List all containers with their status
-docker-manager stopped                     List only stopped/exited containers
-docker-manager services <name>             List all services in a container's compose project
-docker-manager restart <name> [service]    Restart a service or entire compose stack
-docker-manager logs <name> [N]             Show last N lines of logs (default: 50)
-docker-manager compose-list               List all detected compose projects
+docker-manager status                          List all containers with their status
+docker-manager stopped                         List only stopped/exited containers
+docker-manager services <name>                 List all services in a container's compose project
+docker-manager restart <name> [service]        Restart a service or entire stack (by container/service name)
+docker-manager restart-project <name>          Restart a whole compose project by project name (fuzzy match)
+docker-manager logs <name> [N]                 Show last N lines of logs (default: 50)
+docker-manager compose-list                    List all detected compose projects
 ```
 
 ## Restart behaviour
 
-- `<name>` can be a **container name** or a **compose service name**
-- If `[service]` is given, restarts only that service (not the whole stack)
-- Running container → uses `docker compose restart` (graceful, no recreation)
-- Stopped container → uses `docker compose down` + `up -d` (full recreation)
-- Falls back to `docker start` if no compose project is detected
+- `restart <container/service>` — looks up compose file from that container's labels
+- `restart-project <name>` — searches all containers for a matching project name (fuzzy/case-insensitive); use this when the user refers to a stack by name (e.g. "home-media", "arr stack", "media")
+- Running stack → uses `docker compose restart` (graceful)
+- Stopped stack → uses `docker compose down` + `up -d` (full recreation)
+- Falls back to individual `docker start` if compose file path isn't accessible
 
 ## When to use
 
 - User asks "which containers are down?" → `docker-manager stopped`
 - User asks "what services are in the X stack?" → `docker-manager services X`
-- User asks to restart a whole stack → `docker-manager restart <name>`
+- User asks to restart a whole stack by project name → `docker-manager restart-project <name>`
+- User asks to restart a container by name → `docker-manager restart <name>`
 - User asks to restart a specific service → `docker-manager restart <name> <service>`
 - User asks about a container's logs → `docker-manager logs <name>`
 - User asks for overall status → `docker-manager status`

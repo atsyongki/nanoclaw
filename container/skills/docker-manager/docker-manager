@@ -16,14 +16,16 @@ Usage:
   docker-manager stopped                     List only stopped/exited containers
   docker-manager services <name>             List all services in a container's compose project
   docker-manager restart <name> [service]    Restart a service or entire compose stack
+  docker-manager restart-project <name>      Restart a whole compose project by project name
   docker-manager logs <name> [N]             Show last N lines of container logs (default: 50)
   docker-manager compose-list                List all detected compose projects
   docker-manager help                        Show this help
 
 Restart behaviour:
-  - If a specific [service] is given, restarts only that service in the stack
+  - restart <container/service> [service]  — find stack via container label
+  - restart-project <project-name>         — find stack by project name (fuzzy match)
   - If container is stopped, does compose down + up (full recreation)
-  - If container is running, does compose restart <service> (graceful)
+  - If container is running, does compose restart (graceful)
 
 Examples:
   docker-manager stopped
@@ -45,6 +47,29 @@ win_to_wsl() {
   fi
   # C:\foo\bar -> /mnt/c/foo/bar
   echo "$p" | sed 's|^\([A-Za-z]\):\\|/mnt/\L\1/|; s|\\|/|g'
+}
+
+# Find compose file and project name for a given project name (searches container labels)
+# Sets global vars: FOUND_PROJECT, FOUND_CONFIG_WSL
+find_project_by_name() {
+  local query="${1:-}"
+  FOUND_PROJECT=""
+  FOUND_CONFIG_WSL=""
+
+  while read -r c; do
+    local proj config_files
+    proj=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+    [ -z "$proj" ] && continue
+
+    # Fuzzy match: exact or case-insensitive substring
+    if [[ "${proj,,}" == "${query,,}" ]] || [[ "${proj,,}" == *"${query,,}"* ]] || [[ "${query,,}" == *"${proj,,}"* ]]; then
+      config_files=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+      FOUND_PROJECT="$proj"
+      FOUND_CONFIG_WSL=$(win_to_wsl "${config_files:-}")
+      return 0
+    fi
+  done < <(docker ps -a --format '{{.Names}}')
+  return 1
 }
 
 cmd="${1:-status}"
@@ -206,6 +231,56 @@ case "$cmd" in
     fi
     echo "=== Logs: $CONTAINER (last $LINES lines) ==="
     docker logs --tail "$LINES" "$CONTAINER" 2>&1
+    ;;
+
+  restart-project|restart-stack)
+    PROJECT_QUERY="${1:-}"
+    if [ -z "$PROJECT_QUERY" ]; then
+      echo "Usage: docker-manager restart-project <project-name>"
+      echo "Tip:   run 'docker-manager compose-list' to see project names"
+      exit 1
+    fi
+
+    if ! find_project_by_name "$PROJECT_QUERY"; then
+      echo "❌ No compose project matching '$PROJECT_QUERY' found."
+      echo ""
+      echo "Known projects:"
+      docker ps -a --format '{{index .Labels "com.docker.compose.project"}}' \
+        | sort -u | grep -v '^$' | sed 's/^/  - /'
+      exit 1
+    fi
+
+    echo "📦 Project:      $FOUND_PROJECT"
+    echo "📄 Compose file: $FOUND_CONFIG_WSL"
+    echo ""
+
+    if [ ! -f "$FOUND_CONFIG_WSL" ]; then
+      echo "⚠️  Compose file not found at $FOUND_CONFIG_WSL"
+      echo "Falling back: restarting all containers in the project individually..."
+      docker ps -a --filter "label=com.docker.compose.project=$FOUND_PROJECT" \
+        --format '{{.Names}}' | while read -r c; do
+        echo "  Starting $c..."
+        docker start "$c" 2>/dev/null || true
+      done
+      echo "✓ Done."
+      exit 0
+    fi
+
+    # Check if any container in the project is running
+    RUNNING=$(docker ps --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}' | head -1)
+
+    if [ -n "$RUNNING" ]; then
+      echo "🔄 Project is running — doing graceful restart..."
+      docker compose -f "$FOUND_CONFIG_WSL" restart
+    else
+      echo "⏹  Project is stopped — recreating stack..."
+      docker compose -f "$FOUND_CONFIG_WSL" down
+      echo "▶️  Starting stack..."
+      docker compose -f "$FOUND_CONFIG_WSL" up -d
+    fi
+
+    echo ""
+    echo "✓ Project '$FOUND_PROJECT' restarted."
     ;;
 
   compose-list)
