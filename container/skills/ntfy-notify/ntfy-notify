@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# ntfy-notify — send push notifications via Ntfy
+# ---------------------------------------------------------------------------
+
+NTFY_URL="${NTFY_URL:-http://host.docker.internal:8095}"
+NTFY_TOKEN="${NTFY_TOKEN:-}"
+NTFY_DEFAULT_TOPIC="${NTFY_DEFAULT_TOPIC:-andy}"
+
+CMD="${1:-help}"
+shift || true
+
+usage() {
+  cat <<'EOF'
+ntfy-notify — send push notifications via Ntfy
+
+USAGE:
+  ntfy-notify send <message> [options]
+  ntfy-notify send-topic <topic> <message> [options]
+  ntfy-notify topics
+
+OPTIONS (as extra args after message):
+  --title "My Title"
+  --priority default|low|min|high|max|urgent
+  --tags tag1,tag2           (emoji shortcuts: e.g. "warning,tada")
+  --click "https://..."      (URL to open on click)
+  --attach "https://..."     (URL of attachment)
+
+EXAMPLES:
+  ntfy-notify send "Backup complete"
+  ntfy-notify send "Download finished" --title "Radarr" --priority high --tags tada
+  ntfy-notify send "Server is down!" --priority urgent --tags warning
+  ntfy-notify send-topic alerts "Disk usage 90%" --priority high
+EOF
+}
+
+send_notification() {
+  local TOPIC="$1"
+  local MESSAGE="$2"
+  shift 2
+
+  local TITLE=""
+  local PRIORITY="default"
+  local TAGS=""
+  local CLICK=""
+  local ATTACH=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --title)    TITLE="$2";    shift 2 ;;
+      --priority) PRIORITY="$2"; shift 2 ;;
+      --tags)     TAGS="$2";     shift 2 ;;
+      --click)    CLICK="$2";    shift 2 ;;
+      --attach)   ATTACH="$2";   shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  local HEADERS=()
+  HEADERS+=(-H "Content-Type: text/plain")
+  [ -n "$NTFY_TOKEN" ] && HEADERS+=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+  [ -n "$TITLE" ]      && HEADERS+=(-H "Title: ${TITLE}")
+  [ -n "$PRIORITY" ]   && HEADERS+=(-H "Priority: ${PRIORITY}")
+  [ -n "$TAGS" ]       && HEADERS+=(-H "Tags: ${TAGS}")
+  [ -n "$CLICK" ]      && HEADERS+=(-H "Click: ${CLICK}")
+  [ -n "$ATTACH" ]     && HEADERS+=(-H "Attach: ${ATTACH}")
+
+  local RESPONSE
+  RESPONSE=$(curl -sf -X POST "${NTFY_URL}/${TOPIC}" \
+    "${HEADERS[@]}" \
+    -d "${MESSAGE}" 2>&1)
+
+  if echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'✓ Sent to /{d[\"topic\"]}: {d[\"message\"][:60]}')" 2>/dev/null; then
+    return 0
+  else
+    echo "✗ Failed to send notification: $RESPONSE"
+    return 1
+  fi
+}
+
+case "$CMD" in
+  send)
+    MESSAGE="${1:-}"
+    if [ -z "$MESSAGE" ]; then echo "Usage: ntfy-notify send <message> [options]"; exit 1; fi
+    shift
+    send_notification "$NTFY_DEFAULT_TOPIC" "$MESSAGE" "$@"
+    ;;
+
+  send-topic)
+    TOPIC="${1:-}"
+    MESSAGE="${2:-}"
+    if [ -z "$TOPIC" ] || [ -z "$MESSAGE" ]; then
+      echo "Usage: ntfy-notify send-topic <topic> <message> [options]"
+      exit 1
+    fi
+    shift 2
+    send_notification "$TOPIC" "$MESSAGE" "$@"
+    ;;
+
+  topics)
+    # List topics with recent message counts
+    curl -sf -H "Authorization: Bearer ${NTFY_TOKEN}" \
+      "${NTFY_URL}/v1/stats" 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(f'Messages total: {d.get(\"messages\", \"?\")}')
+except: print('Stats not available')
+" || echo "(stats unavailable)"
+    ;;
+
+  help|*)
+    usage
+    ;;
+esac

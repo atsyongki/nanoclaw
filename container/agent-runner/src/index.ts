@@ -79,6 +79,26 @@ async function main(): Promise<void> {
       args: ['run', mcpServerPath],
       env: {},
     },
+    gmail: {
+      command: 'npx',
+      args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+      env: {},
+    },
+    ...(process.env.HA_URL && process.env.HA_TOKEN
+      ? {
+          'home-assistant': {
+            command: 'npx',
+            args: [
+              '-y',
+              'mcp-remote',
+              `${process.env.HA_URL.replace(/\/$/, '')}/api/mcp`,
+              '--header',
+              `Authorization: Bearer ${process.env.HA_TOKEN}`,
+            ],
+            env: {},
+          } as { command: string; args: string[]; env: Record<string, string> },
+        }
+      : {}),
   };
 
   for (const [name, serverConfig] of Object.entries(config.mcpServers)) {

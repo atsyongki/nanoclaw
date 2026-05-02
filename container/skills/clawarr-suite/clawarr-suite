@@ -1,0 +1,374 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# clawarr-suite — *arr app manager for NanoClaw
+# Supports: Radarr, Sonarr, Prowlarr, Bazarr
+# ---------------------------------------------------------------------------
+
+RADARR_URL="http://host.docker.internal:7878"
+RADARR_KEY="f5c2c7c6a4ca4b8290bcb842c7d4bed0"
+
+SONARR_URL="http://host.docker.internal:8989"
+SONARR_KEY="6e9b0a69b49a4f88a714f1c6facb6a21"
+
+PROWLARR_URL="http://host.docker.internal:9696"
+PROWLARR_KEY="0b6b5e45edfb466fbc3d016774da1b83"
+
+BAZARR_URL="http://host.docker.internal:6767"
+BAZARR_KEY="1fc089641210df769d2f5ebbe47e050c"
+
+CMD="${1:-help}"
+shift || true
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+radarr()  { curl -sf "${RADARR_URL}/api/v3/${1}" -H "X-Api-Key: ${RADARR_KEY}" "${@:2}"; }
+sonarr()  { curl -sf "${SONARR_URL}/api/v3/${1}" -H "X-Api-Key: ${SONARR_KEY}" "${@:2}"; }
+prowlarr(){ curl -sf "${PROWLARR_URL}/api/v1/${1}" -H "X-Api-Key: ${PROWLARR_KEY}" "${@:2}"; }
+bazarr()  { curl -sf "${BAZARR_URL}/api/${1}" -H "X-Api-Key: ${BAZARR_KEY}" "${@:2}"; }
+
+radarr_post()  { curl -sf -X POST "${RADARR_URL}/api/v3/${1}" -H "X-Api-Key: ${RADARR_KEY}" -H "Content-Type: application/json" -d "${2:-{\}}"; }
+sonarr_post()  { curl -sf -X POST "${SONARR_URL}/api/v3/${1}" -H "X-Api-Key: ${SONARR_KEY}" -H "Content-Type: application/json" -d "${2:-{\}}"; }
+radarr_del()   { curl -sf -X DELETE "${RADARR_URL}/api/v3/${1}" -H "X-Api-Key: ${RADARR_KEY}"; }
+sonarr_del()   { curl -sf -X DELETE "${SONARR_URL}/api/v3/${1}" -H "X-Api-Key: ${SONARR_KEY}"; }
+
+pretty() { python3 -m json.tool 2>/dev/null || cat; }
+
+# ---------------------------------------------------------------------------
+# commands
+# ---------------------------------------------------------------------------
+
+case "$CMD" in
+
+  # ---------- STATUS -------------------------------------------------------
+  status)
+    echo "=== Radarr ==="
+    radarr "system/status" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  v{d[\"version\"]}  |  {d[\"startupPath\"]}')" 2>/dev/null || echo "  unreachable"
+    echo "=== Sonarr ==="
+    sonarr "system/status" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  v{d[\"version\"]}  |  {d[\"startupPath\"]}')" 2>/dev/null || echo "  unreachable"
+    echo "=== Prowlarr ==="
+    prowlarr "system/status" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  v{d[\"version\"]}  |  {d[\"startupPath\"]}')" 2>/dev/null || echo "  unreachable"
+    echo "=== Bazarr ==="
+    bazarr "system/status" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  v{d[\"data\"][\"bazarr_version\"]}  |  running')" 2>/dev/null || echo "  unreachable"
+    ;;
+
+  # ---------- MOVIES -------------------------------------------------------
+  movies)
+    # clawarr-suite movies [search]
+    QUERY="${1:-}"
+    radarr "movie" | python3 -c "
+import sys, json
+movies = json.load(sys.stdin)
+query = '${QUERY}'.lower()
+for m in sorted(movies, key=lambda x: x.get('sortTitle','')):
+    title = m.get('title','?')
+    year = m.get('year','')
+    has_file = m.get('hasFile', False)
+    monitored = m.get('monitored', False)
+    if query and query not in title.lower():
+        continue
+    status = '✓' if has_file else ('⏳' if monitored else '✗')
+    print(f'{status}  {title} ({year})')
+"
+    ;;
+
+  # ---------- SERIES -------------------------------------------------------
+  series)
+    QUERY="${1:-}"
+    sonarr "series" | python3 -c "
+import sys, json
+series = json.load(sys.stdin)
+query = '${QUERY}'.lower()
+for s in sorted(series, key=lambda x: x.get('sortTitle','')):
+    title = s.get('title','?')
+    year = s.get('year','')
+    stats = s.get('statistics', {})
+    ep_count = stats.get('episodeFileCount', 0)
+    ep_total = stats.get('totalEpisodeCount', 0)
+    monitored = s.get('monitored', False)
+    if query and query not in title.lower():
+        continue
+    status = '✓' if ep_count == ep_total and ep_total > 0 else ('⏳' if monitored else '✗')
+    print(f'{status}  {title} ({year})  [{ep_count}/{ep_total} eps]')
+"
+    ;;
+
+  # ---------- QUEUE --------------------------------------------------------
+  queue)
+    APP="${1:-all}"
+    if [[ "$APP" == "all" || "$APP" == "radarr" ]]; then
+      echo "=== Radarr Queue ==="
+      radarr "queue?pageSize=50" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+records = data.get('records', [])
+if not records:
+    print('  (empty)')
+for r in records:
+    title = r.get('title','?')[:60]
+    status = r.get('status','?')
+    pct = ''
+    if r.get('size',0) > 0:
+        pct = f\" {100*(1 - r.get('sizeleft',0)/r['size']):.0f}%\"
+    print(f'  [{status}{pct}]  {title}')
+" 2>/dev/null
+    fi
+    if [[ "$APP" == "all" || "$APP" == "sonarr" ]]; then
+      echo "=== Sonarr Queue ==="
+      sonarr "queue?pageSize=50" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+records = data.get('records', [])
+if not records:
+    print('  (empty)')
+for r in records:
+    title = r.get('title','?')[:60]
+    status = r.get('status','?')
+    pct = ''
+    if r.get('size',0) > 0:
+        pct = f\" {100*(1 - r.get('sizeleft',0)/r['size']):.0f}%\"
+    print(f'  [{status}{pct}]  {title}')
+" 2>/dev/null
+    fi
+    ;;
+
+  # ---------- MISSING ------------------------------------------------------
+  missing)
+    APP="${1:-all}"
+    if [[ "$APP" == "all" || "$APP" == "radarr" ]]; then
+      echo "=== Missing Movies ==="
+      radarr "wanted/missing?pageSize=20&sortKey=title" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for m in data.get('records', []):
+    print(f'  {m[\"title\"]} ({m.get(\"year\",\"\")})')
+" 2>/dev/null || echo "  (none)"
+    fi
+    if [[ "$APP" == "all" || "$APP" == "sonarr" ]]; then
+      echo "=== Missing Episodes ==="
+      sonarr "wanted/missing?pageSize=20&sortKey=series.title" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for e in data.get('records', []):
+    series = e.get('series',{}).get('title','?')
+    ep = f\"S{e.get('seasonNumber',0):02d}E{e.get('episodeNumber',0):02d}\"
+    title = e.get('title','?')
+    print(f'  {series}  {ep}  {title}')
+" 2>/dev/null || echo "  (none)"
+    fi
+    ;;
+
+  # ---------- SEARCH -------------------------------------------------------
+  search-movie)
+    # clawarr-suite search-movie <title>
+    TITLE="${*}"
+    if [ -z "$TITLE" ]; then echo "Usage: clawarr-suite search-movie <title>"; exit 1; fi
+    radarr "movie/lookup?term=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote('${TITLE}'))")" | python3 -c "
+import sys, json
+results = json.load(sys.stdin)
+for m in results[:10]:
+    title = m.get('title','?')
+    year = m.get('year','')
+    tmdb = m.get('tmdbId','')
+    overview = m.get('overview','')[:80]
+    print(f'  [{tmdb}]  {title} ({year})')
+    if overview:
+        print(f'        {overview}...')
+"
+    ;;
+
+  search-series)
+    TITLE="${*}"
+    if [ -z "$TITLE" ]; then echo "Usage: clawarr-suite search-series <title>"; exit 1; fi
+    sonarr "series/lookup?term=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote('${TITLE}'))")" | python3 -c "
+import sys, json
+results = json.load(sys.stdin)
+for s in results[:10]:
+    title = s.get('title','?')
+    year = s.get('year','')
+    tvdb = s.get('tvdbId','')
+    overview = s.get('overview','')[:80]
+    print(f'  [{tvdb}]  {title} ({year})')
+    if overview:
+        print(f'        {overview}...')
+"
+    ;;
+
+  # ---------- ADD ----------------------------------------------------------
+  add-movie)
+    # clawarr-suite add-movie <tmdbId> [quality-profile-id]
+    TMDB_ID="${1:-}"
+    QUALITY="${2:-1}"
+    if [ -z "$TMDB_ID" ]; then echo "Usage: clawarr-suite add-movie <tmdbId> [qualityProfileId]"; exit 1; fi
+    # Look up movie details first
+    MOVIE_JSON=$(radarr "movie/lookup/tmdb?tmdbId=${TMDB_ID}")
+    TITLE=$(echo "$MOVIE_JSON" | python3 -c "import sys,json; m=json.load(sys.stdin); print(m.get('title','?'))")
+    PAYLOAD=$(echo "$MOVIE_JSON" | python3 -c "
+import sys, json
+m = json.load(sys.stdin)
+m['qualityProfileId'] = ${QUALITY}
+m['rootFolderPath'] = '/downloads/movies'
+m['monitored'] = True
+m['addOptions'] = {'searchForMovie': True}
+print(json.dumps(m))
+")
+    radarr_post "movie" "$PAYLOAD" | python3 -c "import sys,json; m=json.load(sys.stdin); print(f'✓ Added: {m.get(\"title\")} ({m.get(\"year\")})')" 2>/dev/null || echo "✓ Add request sent for: $TITLE"
+    ;;
+
+  add-series)
+    # clawarr-suite add-series <tvdbId> [quality-profile-id]
+    TVDB_ID="${1:-}"
+    QUALITY="${2:-1}"
+    if [ -z "$TVDB_ID" ]; then echo "Usage: clawarr-suite add-series <tvdbId> [qualityProfileId]"; exit 1; fi
+    SERIES_JSON=$(sonarr "series/lookup?term=tvdb:${TVDB_ID}" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)[0]))")
+    TITLE=$(echo "$SERIES_JSON" | python3 -c "import sys,json; s=json.load(sys.stdin); print(s.get('title','?'))")
+    PAYLOAD=$(echo "$SERIES_JSON" | python3 -c "
+import sys, json
+s = json.load(sys.stdin)
+s['qualityProfileId'] = ${QUALITY}
+s['rootFolderPath'] = '/downloads/tv'
+s['monitored'] = True
+s['addOptions'] = {'searchForMissingEpisodes': True}
+print(json.dumps(s))
+")
+    sonarr_post "series" "$PAYLOAD" | python3 -c "import sys,json; s=json.load(sys.stdin); print(f'✓ Added: {s.get(\"title\")} ({s.get(\"year\")})')" 2>/dev/null || echo "✓ Add request sent for: $TITLE"
+    ;;
+
+  # ---------- TRIGGER SEARCH -----------------------------------------------
+  refresh-movie)
+    # clawarr-suite refresh-movie <title-substring>
+    QUERY="${*}"
+    if [ -z "$QUERY" ]; then echo "Usage: clawarr-suite refresh-movie <title>"; exit 1; fi
+    MOVIE_ID=$(radarr "movie" | python3 -c "
+import sys, json
+movies = json.load(sys.stdin)
+q = '${QUERY}'.lower()
+for m in movies:
+    if q in m.get('title','').lower():
+        print(m['id']); break
+")
+    if [ -z "$MOVIE_ID" ]; then echo "Movie not found: $QUERY"; exit 1; fi
+    radarr_post "command" "{\"name\":\"MoviesSearch\",\"movieIds\":[${MOVIE_ID}]}" > /dev/null
+    echo "✓ Search triggered for movie ID $MOVIE_ID"
+    ;;
+
+  refresh-series)
+    QUERY="${*}"
+    if [ -z "$QUERY" ]; then echo "Usage: clawarr-suite refresh-series <title>"; exit 1; fi
+    SERIES_ID=$(sonarr "series" | python3 -c "
+import sys, json
+series = json.load(sys.stdin)
+q = '${QUERY}'.lower()
+for s in series:
+    if q in s.get('title','').lower():
+        print(s['id']); break
+")
+    if [ -z "$SERIES_ID" ]; then echo "Series not found: $QUERY"; exit 1; fi
+    sonarr_post "command" "{\"name\":\"SeriesSearch\",\"seriesId\":${SERIES_ID}}" > /dev/null
+    echo "✓ Search triggered for series ID $SERIES_ID"
+    ;;
+
+  # ---------- DELETE -------------------------------------------------------
+  delete-movie)
+    # clawarr-suite delete-movie <title-substring> [--delete-files]
+    QUERY="${1:-}"
+    DELETE_FILES="${2:-}"
+    if [ -z "$QUERY" ]; then echo "Usage: clawarr-suite delete-movie <title> [--delete-files]"; exit 1; fi
+    MOVIE_ID=$(radarr "movie" | python3 -c "
+import sys, json
+movies = json.load(sys.stdin)
+q = '${QUERY}'.lower()
+for m in movies:
+    if q in m.get('title','').lower():
+        print(m['id']); break
+")
+    if [ -z "$MOVIE_ID" ]; then echo "Movie not found: $QUERY"; exit 1; fi
+    DEL_PARAM=""
+    if [ "$DELETE_FILES" = "--delete-files" ]; then DEL_PARAM="?deleteFiles=true"; fi
+    radarr_del "movie/${MOVIE_ID}${DEL_PARAM}" 2>/dev/null || true
+    echo "✓ Deleted movie ID $MOVIE_ID"
+    ;;
+
+  # ---------- INDEXERS -----------------------------------------------------
+  indexers)
+    prowlarr "indexer" | python3 -c "
+import sys, json
+indexers = json.load(sys.stdin)
+for i in indexers:
+    name = i.get('name','?')
+    enabled = '✓' if i.get('enable') else '✗'
+    protocol = i.get('protocol','?')
+    print(f'  {enabled}  [{protocol}]  {name}')
+"
+    ;;
+
+  indexer-test)
+    prowlarr "indexer/testall" | python3 -c "
+import sys, json
+results = json.load(sys.stdin)
+for r in results:
+    ok = '✓' if r.get('isValid') else '✗'
+    name = r.get('name','?')
+    err = r.get('validationMessage','')
+    print(f'  {ok}  {name}  {err}')
+" 2>/dev/null || echo "(no results)"
+    ;;
+
+  # ---------- SUBTITLES ----------------------------------------------------
+  subtitles-wanted)
+    bazarr "episodes/wanted?start=0&length=20" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for e in data.get('data', []):
+    series = e.get('seriesTitle','?')
+    ep = e.get('episode_number','?')
+    lang = ', '.join(e.get('missing_subtitles',[]))
+    print(f'  {series}  {ep}  [{lang}]')
+" 2>/dev/null || echo "(none or unreachable)"
+    ;;
+
+  # ---------- QUALITY PROFILES ---------------------------------------------
+  quality-profiles)
+    APP="${1:-radarr}"
+    case "$APP" in
+      radarr)  radarr "qualityprofile" ;;
+      sonarr)  sonarr "qualityprofile" ;;
+    esac | python3 -c "
+import sys, json
+profiles = json.load(sys.stdin)
+for p in profiles:
+    print(f'  [{p[\"id\"]}]  {p[\"name\"]}')
+"
+    ;;
+
+  # ---------- HELP ---------------------------------------------------------
+  help|*)
+    cat <<'EOF'
+clawarr-suite — manage Radarr, Sonarr, Prowlarr, Bazarr
+
+USAGE:
+  clawarr-suite <command> [args]
+
+COMMANDS:
+  status                         Show version/health of all apps
+  movies [search]                List movies (optional filter)
+  series [search]                List TV series (optional filter)
+  queue [radarr|sonarr|all]      Show download queue
+  missing [radarr|sonarr|all]    Show missing movies/episodes
+  search-movie <title>           Search for a movie (returns tmdbId)
+  search-series <title>          Search for a series (returns tvdbId)
+  add-movie <tmdbId> [profile]   Add a movie to Radarr
+  add-series <tvdbId> [profile]  Add a series to Sonarr
+  refresh-movie <title>          Trigger search for an existing movie
+  refresh-series <title>         Trigger search for an existing series
+  delete-movie <title> [--delete-files]  Remove a movie from Radarr
+  indexers                       List Prowlarr indexers
+  indexer-test                   Test all Prowlarr indexers
+  subtitles-wanted               Show episodes missing subtitles (Bazarr)
+  quality-profiles [radarr|sonarr]  List quality profiles
+EOF
+    ;;
+esac

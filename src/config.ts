@@ -6,11 +6,28 @@ import { getContainerImageBase, getDefaultContainerImage, getInstallSlug } from 
 import { isValidTimezone } from './timezone.js';
 
 // Read config values from .env (falls back to process.env).
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'OLLAMA_ADMIN_TOOLS', 'ONECLI_URL', 'ONECLI_API_KEY', 'TZ']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'GMAIL_FORWARD_TO_AGENT',
+  'OLLAMA_ADMIN_TOOLS',
+  'ANTHROPIC_BASE_URL',
+  'TELEGRAM_API_ROOT',
+  'HA_URL',
+  'HA_TOKEN',
+  'NTFY_URL',
+  'NTFY_TOKEN',
+  'NTFY_DEFAULT_TOPIC',
+  'ONECLI_URL',
+  'ONECLI_API_KEY',
+  'TZ',
+]);
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+export const GMAIL_FORWARD_TO_AGENT =
+  (process.env.GMAIL_FORWARD_TO_AGENT || envConfig.GMAIL_FORWARD_TO_AGENT) === 'true';
 export const OLLAMA_ADMIN_TOOLS =
   (process.env.OLLAMA_ADMIN_TOOLS || envConfig.OLLAMA_ADMIN_TOOLS) === 'true';
 
@@ -37,6 +54,13 @@ export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760', 10); // 10MB default
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
+export const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL || envConfig.ANTHROPIC_BASE_URL;
+export const TELEGRAM_API_ROOT = process.env.TELEGRAM_API_ROOT || envConfig.TELEGRAM_API_ROOT;
+export const HA_URL = process.env.HA_URL || envConfig.HA_URL;
+export const HA_TOKEN = process.env.HA_TOKEN || envConfig.HA_TOKEN;
+export const NTFY_URL = process.env.NTFY_URL || envConfig.NTFY_URL;
+export const NTFY_TOKEN = process.env.NTFY_TOKEN || envConfig.NTFY_TOKEN;
+export const NTFY_DEFAULT_TOPIC = process.env.NTFY_DEFAULT_TOPIC || envConfig.NTFY_DEFAULT_TOPIC || 'andy';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(1, parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10);
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);

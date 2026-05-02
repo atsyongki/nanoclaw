@@ -5,16 +5,23 @@
  */
 import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { OneCLI } from '@onecli-sh/sdk';
 
 import {
+  ANTHROPIC_BASE_URL,
   CONTAINER_IMAGE,
   CONTAINER_IMAGE_BASE,
   CONTAINER_INSTALL_LABEL,
   DATA_DIR,
   GROUPS_DIR,
+  HA_TOKEN,
+  HA_URL,
+  NTFY_DEFAULT_TOPIC,
+  NTFY_TOKEN,
+  NTFY_URL,
   OLLAMA_ADMIN_TOOLS,
   ONECLI_API_KEY,
   ONECLI_URL,
@@ -337,6 +344,37 @@ function buildMounts(
     mounts.push(...providerContribution.mounts);
   }
 
+  // Gmail credentials directory (for Gmail MCP inside the container)
+  const homeDir = os.homedir();
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
+
+  // Docker management: mount Docker socket and compose directory for main group
+  if (agentGroup.folder === 'main') {
+    const dockerSock = '/var/run/docker.sock';
+    if (fs.existsSync(dockerSock)) {
+      mounts.push({
+        hostPath: dockerSock,
+        containerPath: '/var/run/docker.sock',
+        readonly: false,
+      });
+    }
+    const composeDir = '/mnt/c/docker';
+    if (fs.existsSync(composeDir)) {
+      mounts.push({
+        hostPath: composeDir,
+        containerPath: '/mnt/c/docker',
+        readonly: true,
+      });
+    }
+  }
+
   return mounts;
 }
 
@@ -445,9 +483,30 @@ async function buildContainerArgs(
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Pass Home Assistant connection config if configured
+  if (HA_URL) args.push('-e', `HA_URL=${HA_URL}`);
+  if (HA_TOKEN) args.push('-e', `HA_TOKEN=${HA_TOKEN}`);
+
+  // Pass Ntfy notification config if configured
+  if (NTFY_URL) args.push('-e', `NTFY_URL=${NTFY_URL}`);
+  if (NTFY_TOKEN) args.push('-e', `NTFY_TOKEN=${NTFY_TOKEN}`);
+  if (NTFY_DEFAULT_TOPIC) args.push('-e', `NTFY_DEFAULT_TOPIC=${NTFY_DEFAULT_TOPIC}`);
+
   // Forward Ollama admin tools flag if enabled
   if (OLLAMA_ADMIN_TOOLS) {
     args.push('-e', 'OLLAMA_ADMIN_TOOLS=true');
+  }
+
+  // When using a local LiteLLM proxy instead of Anthropic directly,
+  // inject the base URL and a placeholder key (LiteLLM doesn't validate it).
+  if (ANTHROPIC_BASE_URL) {
+    args.push('-e', `ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}`);
+    args.push(
+      '-e',
+      'ANTHROPIC_API_KEY=sk-ant-api01-litellm-proxy-placeholder-000000000000000000000000000000000000000000000000',
+    );
+    const litellmHost = new URL(ANTHROPIC_BASE_URL).hostname;
+    args.push('-e', `NO_PROXY=host.docker.internal,127.0.0.1,localhost,${litellmHost}`);
   }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).

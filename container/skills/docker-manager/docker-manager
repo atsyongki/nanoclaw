@@ -1,0 +1,389 @@
+#!/bin/bash
+set -euo pipefail
+
+# docker-manager — Inspect and manage Docker containers and compose stacks
+# Translates Windows paths (C:\docker\...) to WSL2 paths (/mnt/c/docker/...)
+
+VERSION="1.0.0"
+COMPOSE_MOUNT="${DOCKER_COMPOSE_DIR:-/mnt/c/docker}"
+
+usage() {
+  cat <<'USAGE'
+docker-manager — Inspect and manage Docker containers and compose stacks
+
+Usage:
+  docker-manager status                      List all containers with their status
+  docker-manager stopped                     List only stopped/exited containers
+  docker-manager services <name>             List all services in a container's compose project
+  docker-manager restart <name> [service]    Restart a service or entire compose stack
+  docker-manager restart-project <name>      Restart a whole compose project by project name
+  docker-manager stop-project <name>         Stop (but keep) all containers in a compose project
+  docker-manager down-project <name>         Stop and remove all containers in a compose project
+  docker-manager logs <name> [N]             Show last N lines of container logs (default: 50)
+  docker-manager compose-list                List all detected compose projects
+  docker-manager help                        Show this help
+
+Restart behaviour:
+  - restart <container/service> [service]  — find stack via container label
+  - restart-project <project-name>         — find stack by project name (fuzzy match)
+  - If container is stopped, does compose down + up (full recreation)
+  - If container is running, does compose restart (graceful)
+
+Examples:
+  docker-manager stopped
+  docker-manager services overseerr
+  docker-manager restart overseerr
+  docker-manager restart mystack sonarr
+  docker-manager logs sonarr 100
+  docker-manager compose-list
+USAGE
+}
+
+# Translate a Windows path like C:\docker\foo\bar.yaml to /mnt/c/docker/foo/bar.yaml
+win_to_wsl() {
+  local p="$1"
+  # Already a Unix path
+  if [[ "$p" == /* ]]; then
+    echo "$p"
+    return
+  fi
+  # C:\foo\bar -> /mnt/c/foo/bar
+  echo "$p" | sed 's|^\([A-Za-z]\):\\|/mnt/\L\1/|; s|\\|/|g'
+}
+
+# Find compose file and project name for a given project name (searches container labels)
+# Sets global vars: FOUND_PROJECT, FOUND_CONFIG_WSL
+find_project_by_name() {
+  local query="${1:-}"
+  FOUND_PROJECT=""
+  FOUND_CONFIG_WSL=""
+
+  while read -r c; do
+    local proj config_files
+    proj=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+    [ -z "$proj" ] && continue
+
+    # Fuzzy match: exact or case-insensitive substring
+    if [[ "${proj,,}" == "${query,,}" ]] || [[ "${proj,,}" == *"${query,,}"* ]] || [[ "${query,,}" == *"${proj,,}"* ]]; then
+      config_files=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+      FOUND_PROJECT="$proj"
+      FOUND_CONFIG_WSL=$(win_to_wsl "${config_files:-}")
+      return 0
+    fi
+  done < <(docker ps -a --format '{{.Names}}')
+  return 1
+}
+
+cmd="${1:-status}"
+shift || true
+
+case "$cmd" in
+  status|list)
+    echo "=== All Containers ==="
+    docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null
+    ;;
+
+  stopped|down)
+    echo "=== Stopped / Exited Containers ==="
+    STOPPED=$(docker ps -a --filter "status=exited" --filter "status=dead" --format "{{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null)
+    if [ -z "$STOPPED" ]; then
+      echo "✓ All containers are running."
+    else
+      printf "%-40s %-30s %s\n" "NAME" "STATUS" "IMAGE"
+      echo "$STOPPED" | while IFS=$'\t' read -r name status image; do
+        printf "%-40s %-30s %s\n" "$name" "$status" "$image"
+      done
+    fi
+    ;;
+
+  services)
+    CONTAINER="${1:-}"
+    if [ -z "$CONTAINER" ]; then
+      echo "Usage: docker-manager services <container-or-project-name>"
+      exit 1
+    fi
+
+    # Try to find by container name first, then by project name
+    CONFIG_FILES=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+    WORKING_DIR=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+    PROJECT=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+
+    # If not found by container name, search by project name across all containers
+    if [ -z "$CONFIG_FILES" ]; then
+      MATCH=$(docker ps -a --format '{{.Names}}' | while read -r c; do
+        proj=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+        if [ "$proj" = "$CONTAINER" ]; then
+          docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null
+          break
+        fi
+      done)
+      CONFIG_FILES="$MATCH"
+    fi
+
+    if [ -z "$CONFIG_FILES" ]; then
+      echo "❌ No compose project found for '$CONTAINER'"
+      exit 1
+    fi
+
+    CONFIG_WSL=$(win_to_wsl "$CONFIG_FILES")
+    echo "📦 Compose project: ${PROJECT:-$CONTAINER}"
+    echo "📄 Compose file:    $CONFIG_WSL"
+    echo ""
+    if [ -f "$CONFIG_WSL" ]; then
+      echo "=== Services ==="
+      docker compose -f "$CONFIG_WSL" config --services 2>/dev/null
+    else
+      echo "⚠️  Compose file not found at $CONFIG_WSL"
+    fi
+    ;;
+
+  restart)
+    CONTAINER="${1:-}"
+    SERVICE="${2:-}"
+    if [ -z "$CONTAINER" ]; then
+      echo "Usage: docker-manager restart <container-or-service-name> [service]"
+      exit 1
+    fi
+
+    # Get compose labels (works even on stopped containers)
+    CONFIG_FILES=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+    WORKING_DIR=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+    PROJECT=$(docker inspect "$CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+
+    # If container name not found directly, try matching by compose service name
+    if [ -z "$CONFIG_FILES" ]; then
+      MATCHED_CONTAINER=""
+      while read -r c; do
+        svc=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.service"}}' 2>/dev/null || true)
+        if [ "$svc" = "$CONTAINER" ]; then
+          MATCHED_CONTAINER="$c"
+          CONFIG_FILES=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+          WORKING_DIR=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)
+          PROJECT=$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+          # If no explicit service given, use the matched service name
+          [ -z "$SERVICE" ] && SERVICE="$CONTAINER"
+          break
+        fi
+      done < <(docker ps -a --format '{{.Names}}')
+      [ -n "$MATCHED_CONTAINER" ] && CONTAINER="$MATCHED_CONTAINER"
+    fi
+
+    # If still no match, try project name lookup (fuzzy)
+    if [ -z "$CONFIG_FILES" ]; then
+      if find_project_by_name "$CONTAINER"; then
+        echo "🔍 No container named '$CONTAINER' — matched compose project '$FOUND_PROJECT'"
+        exec "$0" restart-project "$CONTAINER"
+      fi
+    fi
+
+    if [ -n "$CONFIG_FILES" ]; then
+      CONFIG_WSL=$(win_to_wsl "$CONFIG_FILES")
+      echo "📦 Compose project: $PROJECT"
+      echo "📄 Compose file:    $CONFIG_WSL"
+      [ -n "$SERVICE" ] && echo "🔧 Service:         $SERVICE"
+      echo ""
+
+      if [ -f "$CONFIG_WSL" ]; then
+        STATE=$(docker inspect "$CONTAINER" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
+        if [ "$STATE" = "running" ]; then
+          echo "🔄 Doing graceful restart..."
+          docker compose -f "$CONFIG_WSL" restart ${SERVICE:-}
+        else
+          echo "▶️  Starting stopped container..."
+          docker compose -f "$CONFIG_WSL" up -d ${SERVICE:-}
+        fi
+      else
+        echo "⚠️  Compose file not found — using docker restart..."
+        docker restart "$CONTAINER"
+      fi
+      echo "✓ Done."
+    else
+      echo "ℹ️  No compose project found for '$CONTAINER' — doing direct container restart..."
+      docker restart "$CONTAINER" 2>/dev/null || docker start "$CONTAINER"
+      echo "✓ Container $CONTAINER restarted."
+    fi
+    ;;
+
+  logs)
+    CONTAINER="${1:-}"
+    LINES="${2:-50}"
+    if [ -z "$CONTAINER" ]; then
+      echo "Usage: docker-manager logs <container-name> [lines]"
+      exit 1
+    fi
+    echo "=== Logs: $CONTAINER (last $LINES lines) ==="
+    docker logs --tail "$LINES" "$CONTAINER" 2>&1
+    ;;
+
+  restart-project|restart-stack)
+    PROJECT_QUERY="${1:-}"
+    if [ -z "$PROJECT_QUERY" ]; then
+      echo "Usage: docker-manager restart-project <project-name>"
+      echo "Tip:   run 'docker-manager compose-list' to see project names"
+      exit 1
+    fi
+
+    if ! find_project_by_name "$PROJECT_QUERY"; then
+      echo "❌ No compose project matching '$PROJECT_QUERY' found."
+      echo ""
+      echo "Known projects:"
+      docker ps -a --format '{{index .Labels "com.docker.compose.project"}}' \
+        | sort -u | grep -v '^$' | sed 's/^/  - /'
+      exit 1
+    fi
+
+    echo "📦 Project:      $FOUND_PROJECT"
+    echo "📄 Compose file: $FOUND_CONFIG_WSL"
+    echo ""
+
+    # Derive the working directory from the compose file path
+    COMPOSE_WORKDIR=$(dirname "$FOUND_CONFIG_WSL")
+
+    if [ -f "$FOUND_CONFIG_WSL" ] && [ -d "$COMPOSE_WORKDIR" ]; then
+      # Run docker compose from its working directory so .env and relative paths resolve
+      RUNNING=$(docker ps --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}' | head -1)
+      if [ -n "$RUNNING" ]; then
+        echo "🔄 Project is running — doing graceful restart (respects dependency order)..."
+        (cd "$COMPOSE_WORKDIR" && docker compose -f "$FOUND_CONFIG_WSL" restart) || true
+      else
+        echo "▶️  Project is stopped — starting stack (respects dependency order)..."
+        (cd "$COMPOSE_WORKDIR" && docker compose -f "$FOUND_CONFIG_WSL" up -d) || true
+      fi
+    else
+      echo "⚠️  Compose file not accessible at $FOUND_CONFIG_WSL"
+      echo "    Falling back to per-container restart (no dependency ordering)..."
+      CONTAINERS=$(docker ps -a --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}')
+      TOTAL=$(echo "$CONTAINERS" | wc -l)
+      echo "$CONTAINERS" | while read -r c; do
+        STATE=$(docker inspect "$c" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
+        if [ "$STATE" = "running" ]; then
+          echo "  🔄 Restarting $c..."
+          docker restart "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+        else
+          echo "  ▶️  Starting $c..."
+          docker start "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+        fi
+      done
+      echo "✓ Done ($TOTAL containers)."
+      exit 0
+    fi
+
+    echo ""
+    echo "✓ Project '$FOUND_PROJECT' restarted."
+    ;;
+
+  stop-project|stop-stack)
+    PROJECT_QUERY="${1:-}"
+    if [ -z "$PROJECT_QUERY" ]; then
+      echo "Usage: docker-manager stop-project <project-name>"
+      exit 1
+    fi
+
+    if ! find_project_by_name "$PROJECT_QUERY"; then
+      echo "❌ No compose project matching '$PROJECT_QUERY' found."
+      echo "Known projects:"
+      docker ps -a --format '{{index .Labels "com.docker.compose.project"}}' \
+        | sort -u | grep -v '^$' | sed 's/^/  - /'
+      exit 1
+    fi
+
+    echo "📦 Project: $FOUND_PROJECT"
+    COMPOSE_WORKDIR=$(dirname "$FOUND_CONFIG_WSL")
+
+    if [ -f "$FOUND_CONFIG_WSL" ] && [ -d "$COMPOSE_WORKDIR" ]; then
+      echo "⏹  Stopping stack (containers kept)..."
+      (cd "$COMPOSE_WORKDIR" && docker compose -f "$FOUND_CONFIG_WSL" stop) || true
+    else
+      echo "⚠️  Compose file not accessible — stopping containers individually..."
+      docker ps --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}' \
+        | while read -r c; do
+          echo "  ⏹  Stopping $c..."
+          docker stop "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+        done
+    fi
+    echo ""
+    echo "✓ Project '$FOUND_PROJECT' stopped."
+    ;;
+
+  down-project|down-stack|remove-project|remove-stack|remove)
+    PROJECT_QUERY="${1:-}"
+    if [ -z "$PROJECT_QUERY" ]; then
+      echo "Usage: docker-manager down-project <project-name>"
+      exit 1
+    fi
+
+    if ! find_project_by_name "$PROJECT_QUERY"; then
+      echo "❌ No compose project matching '$PROJECT_QUERY' found."
+      echo "Known projects:"
+      docker ps -a --format '{{index .Labels "com.docker.compose.project"}}' \
+        | sort -u | grep -v '^$' | sed 's/^/  - /'
+      exit 1
+    fi
+
+    echo "📦 Project: $FOUND_PROJECT"
+    COMPOSE_WORKDIR=$(dirname "$FOUND_CONFIG_WSL")
+
+    if [ -f "$FOUND_CONFIG_WSL" ] && [ -d "$COMPOSE_WORKDIR" ]; then
+      echo "🗑️  Bringing stack down (stop + remove containers)..."
+      (cd "$COMPOSE_WORKDIR" && docker compose -f "$FOUND_CONFIG_WSL" down) || true
+    else
+      echo "⚠️  Compose file not accessible — stopping and removing containers individually..."
+      docker ps -a --filter "label=com.docker.compose.project=$FOUND_PROJECT" --format '{{.Names}}' \
+        | while read -r c; do
+          echo "  ⏹  Stopping $c..."
+          docker stop "$c" 2>/dev/null || true
+          echo "  🗑️  Removing $c..."
+          docker rm "$c" 2>/dev/null && echo "  ✓ $c" || echo "  ⚠️  Failed: $c"
+        done
+    fi
+    echo ""
+    echo "✓ Project '$FOUND_PROJECT' removed."
+    ;;
+
+  compose-list)
+    echo "=== Compose Projects (discovered from container labels) ==="
+    printf "%-30s %-50s %s\n" "PROJECT" "COMPOSE FILE" "CONTAINERS"
+    echo "--------------------------------------------------------------------------------------------------------------"
+
+    declare -A seen_projects
+    while read -r container; do
+      project=$(docker inspect "$container" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+      [ -z "$project" ] && continue
+      [ "${seen_projects[$project]+_}" ] && continue
+      seen_projects["$project"]=1
+
+      config_files=$(docker inspect "$container" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+      config_wsl=$(win_to_wsl "${config_files:-}")
+
+      # Count containers in this project
+      count=$(docker ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}' | wc -l)
+
+      printf "%-30s %-50s %s container(s)\n" "$project" "${config_wsl:-unknown}" "$count"
+    done < <(docker ps -a --format '{{.Names}}')
+
+    # Show per-project container details
+    declare -A seen2
+    echo ""
+    while read -r container; do
+      project=$(docker inspect "$container" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+      [ -z "$project" ] && continue
+      [ "${seen2[$project]+_}" ] && continue
+      seen2["$project"]=1
+
+      echo ""
+      echo "  [$project]"
+      docker ps -a --filter "label=com.docker.compose.project=$project" \
+        --format "    {{.Names}}\t{{.Status}}" | awk -F'\t' '{printf "    %-40s %s\n", $1, $2}'
+    done < <(docker ps -a --format '{{.Names}}')
+    ;;
+
+  help|--help|-h)
+    usage
+    ;;
+
+  *)
+    echo "Unknown command: $cmd"
+    usage
+    exit 1
+    ;;
+esac
