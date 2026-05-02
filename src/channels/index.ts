@@ -8,3 +8,4 @@
 
 import './cli.js';
 import './gmail.js';
+import './telegram.js';
