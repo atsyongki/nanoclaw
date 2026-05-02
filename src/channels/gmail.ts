@@ -46,7 +46,7 @@ function createAdapter(): ChannelAdapter {
       oauth2Client.setCredentials(tokens);
 
       // Persist refreshed tokens
-      oauth2Client.on('tokens', (newTokens) => {
+      oauth2Client.on('tokens', (newTokens: import('google-auth-library').Credentials) => {
         try {
           const current = JSON.parse(fs.readFileSync(tokensPath, 'utf-8'));
           Object.assign(current, newTokens);
@@ -160,7 +160,7 @@ function createAdapter(): ChannelAdapter {
 
     const headers = msg.data.payload?.headers || [];
     const getHeader = (name: string) =>
-      headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+      headers.find((h: gmail_v1.Schema$MessagePartHeader) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
 
     const from = getHeader('From');
     const subject = getHeader('Subject');
