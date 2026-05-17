@@ -9,6 +9,7 @@
  */
 
 import { log } from '../log.js';
+import { TELEGRAM_BOT_TOKEN, TELEGRAM_API_ROOT, ALLOWED_TELEGRAM_CHATS } from '../config.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
@@ -131,10 +132,10 @@ class TelegramAdapter implements ChannelAdapter {
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   async setup(config: ChannelSetup): Promise<void> {
-    const apiRoot = process.env.TELEGRAM_API_ROOT ?? 'https://api.telegram.org';
+    const apiRoot = TELEGRAM_API_ROOT ?? 'https://api.telegram.org';
     this.baseUrl = `${apiRoot}/bot${this.token}`;
 
-    const allowedStr = process.env.ALLOWED_TELEGRAM_CHATS ?? '';
+    const allowedStr = ALLOWED_TELEGRAM_CHATS ?? '';
     for (const id of allowedStr.split(',').map((s) => s.trim()).filter(Boolean)) {
       this.allowedChats.add(id);
     }
@@ -412,9 +413,8 @@ function extractText(content: unknown): string | null {
 }
 
 const factory = (): ChannelAdapter | null => {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return null;
-  return new TelegramAdapter(token);
+  if (!TELEGRAM_BOT_TOKEN) return null;
+  return new TelegramAdapter(TELEGRAM_BOT_TOKEN);
 };
 
 registerChannelAdapter('telegram', { factory });

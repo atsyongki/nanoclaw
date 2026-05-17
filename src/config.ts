@@ -21,6 +21,8 @@ const envConfig = readEnvFile([
   'ONECLI_URL',
   'ONECLI_API_KEY',
   'TZ',
+  'TELEGRAM_BOT_TOKEN',
+  'ALLOWED_TELEGRAM_CHATS',
 ]);
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -56,6 +58,8 @@ export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
 export const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL || envConfig.ANTHROPIC_BASE_URL;
 export const TELEGRAM_API_ROOT = process.env.TELEGRAM_API_ROOT || envConfig.TELEGRAM_API_ROOT;
+export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN;
+export const ALLOWED_TELEGRAM_CHATS = process.env.ALLOWED_TELEGRAM_CHATS || envConfig.ALLOWED_TELEGRAM_CHATS;
 export const HA_URL = process.env.HA_URL || envConfig.HA_URL;
 export const HA_TOKEN = process.env.HA_TOKEN || envConfig.HA_TOKEN;
 export const NTFY_URL = process.env.NTFY_URL || envConfig.NTFY_URL;
